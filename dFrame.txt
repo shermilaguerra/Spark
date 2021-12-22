@@ -1,0 +1,297 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+import sys
+reload(sys)  # Reload does the trick!
+sys.setdefaultencoding('UTF8')#float
+from pyspark.sql.types import *
+from pyspark import SparkConf, SparkContext
+APP_NAME = "Redo"     
+# --------------------------------------------------------------------------
+def split_repPrInt(line):
+    value = line.split(';')
+    ide = value[0]
+    op = value[1]
+    origin = value[2]
+    target = value[3]
+    objKey = value[4]
+    objAtt = value[5]
+    originValue = value[6]
+    targetValue = value[7]
+    return (ide, op, origin, target, objKey, objAtt, originValue, targetValue)
+
+def split_repPrIntTime(line):
+    value = line.split(';')
+    id = int(value[0])
+    op = value[1]
+    origin = value[2]
+    target = value[3]
+    objKey = value[4]
+    objAtt = value[5]
+    originValue = value[6]
+    targetValue = value[7]
+    time = float(value[8])  
+    return (id, op, origin, target, objKey, objAtt, originValue, targetValue, time)
+
+# -------------------------------------------------------------------------
+def FindDependenteDiretaDfv2(R_df,op):
+    global dependenteDiretaDf
+    #função que procura as transitivas dependendentes de op é um dataframe     
+    dependenteDiretaDf=R_df.join(op, ((R_df.origin == op.target) & (R_df.objKey== Op.objKey)& (R_df.objAtt== Op.objAtt)), 'inner') \
+    .select(R_df.id, R_df.op, R_df.origin, R_df.target, R_df.objKey, R_df.objAtt, R_df.originValue, R_df.targetValue)  
+    return dependenteDiretaDf
+# -------------------------------------------------------------------------
+def findVRTOrigem_RDD(RFontes, ROp):
+    global repositorioInvalidoOr
+
+    repositorioValidoOr=ROp.join(RFontes, ((ROp.origin == RFontes.origin) & (ROp.objKey== RFontes.objKey)& (ROp.objAtt== RFontes.objAtt)), 'inner') \
+    .select(ROp.id, ROp.op, ROp.origin, ROp.target, ROp.objKey, ROp.objAtt, ROp.originValue, ROp.targetValue)  
+    repositorioInvalidoOr=ROp.subtract(repositorioValidoOr)
+ 
+    return repositorioInvalidoOr
+
+# -------------------------------------------------------------------------
+def findVRTDestino_RDD(RFontes, ROp):
+    global repositorioInvalidoDes
+
+    repositorioValido=ROp.join(RFontes, ((ROp.origin == RFontes.origin) & (ROp.objKey== RFontes.objKey)& (ROp.objAtt== RFontes.objAtt)), 'inner') \
+    .select(ROp.id, ROp.op, ROp.origin, ROp.target, ROp.objKey, ROp.objAtt, ROp.originValue, ROp.targetValue)  
+    repositorioInvalido=ROp.subtract(repositorioValidoDes)
+ 
+    return repositorioInvalidoDes
+
+# -------------------------------------------------------------------------
+def FindDependenteIndiretaDf(R_df,dependenteDiretaDf): 
+    global dependenteIndiretaDf
+    gdependenteDiretaDf=dependenteDiretaDf.select(dependenteDiretaDf.target.alias('origin'), dependenteDiretaDf.origin.alias('originV'), \
+    dependenteDiretaDf.objKey.alias('objKey'), dependenteDiretaDf.objAtt.alias('objAtt'),  dependenteDiretaDf.originValue.alias('originValue'), \
+    dependenteDiretaDf.targetValue.alias('targetValue'))    
+    dependenteIndiretaDf=R_df.join(
+    gdependenteDiretaDf,
+    (R_df.origin==gdependenteDiretaDf.origin)&(R_df.objKey==gdependenteDiretaDf.objKey)&(R_df.objAtt==gdependenteDiretaDf.objAtt), 
+    "inner").select(R_df.id, R_df.op, R_df.origin, R_df.target, R_df.objKey, R_df.objAtt, R_df.originValue, R_df.targetValue)  
+    return dependenteIndiretaDf
+
+# -------------------------------------------------------------------------
+def FindDependenteIndiretaDfv2(R_df,dependenteDiretaDf): 
+    global dependenteIndiretaDf    
+    dependenteIndiretaDf=R_df.join(
+    dependenteDiretaDf,
+    (R_df.origin==dependenteDiretaDf.target)&(R_df.objKey==dependenteDiretaDf.objKey)&(R_df.objAtt==dependenteDiretaDf.objAtt), 
+    "inner").select(R_df.id, R_df.op, R_df.origin, R_df.target, R_df.objKey, R_df.objAtt, R_df.originValue, R_df.targetValue)  
+    return dependenteIndiretaDf
+# -------------------------------------------------------------------------
+def EditarOperacaoDestino(dependenteDiretaDf, valorOrigemNova, valorDestinoNova):
+    global new_dfRefeito
+    from pyspark.sql.functions import lit
+    new_dfRefeito = dependenteDiretaDf.withColumn('op', lit('Ed'))
+    new_dfRefeito = new_dfRefeito.withColumn('origin', lit('None'))
+    new_dfRefeito = new_dfRefeito.withColumn('originValue', lit(valorOrigemNova))
+    new_dfRefeito = new_dfRefeito.withColumn('targetValue', lit(valorDestinoNova))
+    return new_dfRefeito
+
+
+# -------------------------------------------------------------------------
+def BlindDF(R_df,Op,vO, vD):
+    global R_dfunion
+    R_dfunion=R_df.unionAll(Op) #soma Df1 + Df2          
+    return R_dfunion
+# -------------------------------------------------------------------------
+def Restrict2(R_df, Op, vO, vD):  
+    if V0 > 120:
+         print('Sorry, we can not take a suitcase that heavy.')
+    elif V0 > 50:
+            print('There is a $25 charge for luggage that heavy.')
+   
+def RestrictDF(R_df, Op, vO, vD):     
+    global R_dfunion
+    FinddependenteDiretaDf(R_df,Op)  
+    FindDependenteIndiretaDf(R_df,dependenteDiretaDf)     
+    if dependenteDiretaDf.count()==0 and dependenteIndiretaDf.count()==0:
+        R_dfunion=R_df.unionAll(Op) #soma Df1 + Df2 
+    else: #se existe sobreposição não é permitida a adição da Op
+        print('It is Unable to add, because there is overlap')
+
+# -------------------------------------------------------------------------
+def undoTiraConflitosDF(R_df, Op, vO, vD):  
+    global NR_df1   
+    #operações sobrepostas são removidas ouseja dependentes diretas e indiretas são removidas
+    FindDependenteDiretaDf(R_df,Op)  
+    FindDependenteIndiretaDf(R_df,dependenteDiretaDf)
+    #NR_df=sorted(R_df.subtract(dependenteDiretaDf).show()) 
+    NR_df=R_df.subtract(dependenteDiretaDf)
+    NR_df=R_df.subtract(dependenteDiretaDf)      
+    #NR_df1=sorted(NR_df.subtract(dependenteIndiretaDf).show())
+    NR_df1=NR_df.subtract(dependenteIndiretaDf)       
+    return NR_df1
+    #NR_df1.show()
+def RedoDfv3(R_df,Op,valorOrigemNova, valorDestinoNova):
+    global R_dfunion
+    R_dfunion=R_df.unionAll(Op) #soma Df1 + Df2  
+    FindDependenteDiretaDf(R_dfunion,Op)
+    FindDependenteIndiretaDf(R_df,dependenteDiretaDf)
+    if dependenteDiretaDf.count()>0:#Destino        
+        NR_df=R_dfunion.subtract(dependenteDiretaDf) #tirar a operação direta do repositorio               
+        EditarOperacaoDestino(dependenteDiretaDf, valorOrigemNova, valorDestinoNova)#refazer destino com o valor origem VO (falta)    
+        R_dfunion=NR_df.unionAll(new_dfRefeito) #R_dfunion.show()         
+    elif dependenteIndiretaDf.count()>0:#origem
+        #no origem  dependentes=dependenteDiretaDf+dependenteIndiretaDf
+        #tirar a operação indireta do repositorio
+        NR_df=R_dfunion.subtract(dependenteIndiretaDf)
+        EditarOperacaoDestino(dependenteIndiretaDf,valorOrigemNova, valorDestinoNova)
+        R_dfunion=NR_df.unionAll(new_dfRefeito)
+    else:
+       print('Não existe sobrep#R_dfunion.show() 
+    return R_dfunion   
+
+# -------------------------------------------------------------------------
+
+
+def main():
+    conf = SparkConf().setAppName("Find Direct Transitive")
+    sc = SparkContext(conf=conf)
+    #Create an RDD Não esquecer de fazer rodar SPLIT
+    #R1= sc.textFile("file:///home/cloudera/Dataframe/test1_transitiva1")
+    #R_dd = R1.map(split_repPrInt)
+
+
+    #--Repositorio de operções com 7, 1000, 5000, 10000 e 20000 operações
+    R0= sc.textFile("file:///home/cloudera/Dataframe/teste07")
+    R0 = R0.map(split_repPrInt)
+
+    R1 = sc.textFile("file:///home/cloudera/Dataframe/teste1000A")
+    R11= R1.map(split_repPrInt)# 
+    
+
+    R2 = sc.textFile("file:///home/cloudera/Dataframe/teste5000")
+    R22= R2.map(split_repPrInt)# 
+    
+
+    R3 = sc.textFile("file:///home/cloudera/Dataframe/teste10000AA")
+    R33= R3.map(split_repPrInt)# 
+
+    R4 = sc.textFile("file:///home/cloudera/Dataframe/teste_20000AA")
+    R44= R4.map(split_repPrInt)# 
+
+
+    #R= sc.textFile("file:///home/cloudera/Dataframe/test1_transitiva2")
+    #R0 = R.map(split_repPrInt)
+    #id, op, origin, target, objKey, objAtt, originValue, targetValue, time)
+    #Create an DataFrame with schema
+    from pyspark.sql.types import *
+    schema = StructType ([StructField("id", StringType(), True),
+    StructField("op", StringType(), True),
+    StructField("origin", StringType(), True),
+    StructField("target", StringType(), True),
+    StructField("objKey", StringType(), True),
+    StructField("objAtt", StringType(), True),
+    StructField("originValue", StringType(), True),
+    StructField("targetValue", StringType(), True)])
+    #StructField("time", FloatType(), True)
+    R_df0 = sqlCtx.createDataFrame(R0,schema)
+    R_df0.printSchema()
+
+
+
+    R_df1 = sqlCtx.createDataFrame(R11,schema)
+    R_df1.printSchema()
+
+    R_df2 = sqlCtx.createDataFrame(R22,schema)
+    R_df2.printSchema()
+
+    R_df3 = sqlCtx.createDataFrame(R33,schema)
+    R_df3.printSchema()
+
+    R_df4 = sqlCtx.createDataFrame(R44,schema)
+    R_df4.printSchema()
+
+    #--operçaõ 1, 5, 15, 30 operações transitivas
+    op0 = sc.textFile("file:///home/cloudera/Dataframe/test2_Origem")
+    R_dd0 = op0.map(split_repPrInt)
+    Op = sqlCtx.createDataFrame(R_dd0,schema)
+    Op.printSchema()
+
+    op5 = sc.textFile("file:///home/cloudera/Dataframe/test05Direct_Transitiva")
+    R_dd0 = op5.map(split_repPrInt)
+    Op = sqlCtx.createDataFrame(R_dd0,schema)
+    Op.printSchema()
+
+    op15 = sc.textFile("file:///home/cloudera/Dataframe/test15Direct_Transitiva")
+    R_dd0 = op15.map(split_repPrInt)
+    Op = sqlCtx.createDataFrame(R_dd0,schema)
+    Op.printSchema()
+
+    op30 = sc.textFile("file:///home/cloudera/Dataframe/test30Direct_Transitiva")
+    R_dd0 = op30.map(split_repPrInt)
+    Op = sqlCtx.createDataFrame(R_dd0,schema)
+    Op.printSchema()
+
+    #--operçaõ com 1 op, com 5 op, com  15, com 30 op transitivas 
+
+
+    FindDependenteDiretaDfv2(R_df0,Op)
+
+    dependenteDiretaDf.show()
+    FindDependenteDiretaDfv2(R_df1,Op)
+    FindDependenteDiretaDfv2(R_df2,Op)
+    FindDependenteDiretaDfv2(R_df3,Op)
+    FindDependenteDiretaDfv2(R_df4,Op)
+    dependenteDiretaDf
+
+
+
+    FindDependenteIndiretaDf(R_df0,dependenteDiretaDf)
+    dependenteIndiretaDf.show()
+    FindDependenteIndiretaDf(R_df1,dependenteDiretaDf)
+    dependenteIndiretaDf.show()
+    FindDependenteIndiretaDf(R_df2,dependenteDiretaDf)
+    dependenteIndiretaDf.show()
+    FindDependenteIndiretaDf(R_df3,dependenteDiretaDf)
+    dependenteIndiretaDf.show()
+    FindDependenteIndiretaDf(R_df4,dependenteDiretaDf)
+    dependenteIndiretaDf.show()
+
+
+
+    #RedoSherv2(R_df,Op,Vo0,Vd0)
+    #Restrict(R_df,Op,Vo0,Vd0)
+    undoTiraConflitos(R_df, Op, Vo0, Vd0)
+
+    #Variavel para testar sobreposição origem
+    op1= sc.textFile("file:///home/cloudera/Dataframe/test2")    
+    R_dd1 = op1.map(split_repPrInt)
+    Op = sqlCtx.createDataFrame(R_dd1,schema)
+    Vo1=2005
+    Vd1=2004
+    #RedoSherv2(R_df,Op,Vo1,Vd1)
+    #Restrict(R_df,Op,Vo0,Vd0)
+    undoTiraConflitos(R_df, Op, Vo0, Vd0)
+
+    #FinddependenteDiretaDf(R_df,vNomeDest,vObjKey,vObjAtt,vt)
+    #FindDependenteIndiretaDf(R_df,dependenteDiretaDf)
+   
+
+
+    #R_Trans = sqlCtx.createDataFrame(RTrans,schema)
+    #R_Trans.printSchema()
+#---------------------------GROUP BY------------------------
+R_df2.groupBy(['objKey', R_df2.objAtt]).count().take(50).show()
+
+.take(30).foreach(println)
+R_df1.groupBy(['objKey', R_df1.objAtt]).count().show()
+
+
+
+#---------------------------------------------------
+    
+  
+    # Visualizar
+    for d in dependenteDiretaDf:
+        print  (d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7])
+    sc.stop()         
+
+if __name__ == "__main__":
+    # Configure Spark
+    conf = SparkConf().setAppName(APP_NAME)
+    conf = conf.setMaster('local')
+    sc   = SparkContext(conf=conf)
+    main(sc)

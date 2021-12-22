@@ -1,0 +1,134 @@
+from pyspark import SparkConf, SparkContext
+APP_NAME = "PrInt com Rdd"
+import sys
+reload(sys)  # Reload does the trick!
+sys.setdefaultencoding('UTF8')#float
+# --------------------------------------------------------------------------
+def split_repPrInt(line):
+    value = line.split(';')
+    ide = value[0]
+    op = value[1]
+    origin = value[2]
+    target = value[3]
+    objKey = value[4]
+    objAtt = value[5]
+    originValue = value[6]
+    targetValue = value[7]
+    date = float(value[8])  
+    time = float(value[8])  
+    return (ide, op, origin, target, objKey, objAtt, originValue, targetValue, date, time)
+
+def split_repPrInt4(line):
+    value = line.split(';')
+    #ide1 = value[0]
+    #op = value[1]
+    origin = value[0]
+    target = value[1]
+    objKey = value[1]
+    objAtt = value[2]
+    #originValue = value[6]
+    #targetValue = value[7]
+    return (origin,target, objKey, objAtt)
+# --------------------------------------------------------------------------
+def FindDependenteDiretaRdd(R1,vNome,vObjKey,vObjAtt):
+    global transOp
+    transOp= R1.filter(lambda line: line[3]==vNome and line[4]== vObjKey and line[5]==vObjAtt)
+    return transOp
+
+def FindIndirectTransitiva(R1,vNome,vObjKey,vObjAtt):
+    global indTransOp
+    indTransOp=R1.cartesian(transOp).filter( lambda (k, v): k[2]==v[3]  and  k[4]==v[4]  and  k[5]==v[5])
+    indTransOp.collect()
+    return indTransOp
+
+
+def EditarOperacaoDestino(transOp, valorOrigemNova, valorDestinoNova):
+    global new_dfRefeito
+    new_dfRefeito = transOp.map(lambda x: (x[0], 'Ed', 'None', x[3], x[4], x[5],  valorOrigemNova, valorDestinoNova))
+    return new_dfRefeito
+
+def findVRTOrigem_RDD(RFontes, ROp):
+    global repositorioInvalidoOr
+
+    repositorioValidoOr=ROp.join(RFontes, ((ROp.origin == RFontes.origin) & (ROp.objKey== RFontes.objKey)& (ROp.objAtt== RFontes.objAtt)), 'inner') \
+    .select(ROp.id, ROp.op, ROp.origin, ROp.target, ROp.objKey, ROp.objAtt, ROp.originValue, ROp.targetValue)  
+    repositorioInvalidoOr=ROp.subtract(repositorioValidoOr)
+ 
+    return repositorioInvalidoOr
+
+def findVRTDestino_RDD(RFontes, ROp):
+    global repositorioInvalidoDes
+
+    repositorioValido=ROp.join(RFontes, ((ROp.origin == RFontes.origin) & (ROp.objKey== RFontes.objKey)& (ROp.objAtt== RFontes.objAtt)), 'inner') \
+    .select(ROp.id, ROp.op, ROp.origin, ROp.target, ROp.objKey, ROp.objAtt, ROp.originValue, ROp.targetValue)  
+    repositorioInvalido=ROp.subtract(repositorioValidoDes)
+ 
+    return repositorioInvalidoDes
+
+
+def RedoSherV3RDD(R1, vNome,vObjKey,vObjAttvO, vD):
+    global R_dfunion
+    Rdd_funion=R1 + Op #soma Df1 + Df2  
+    FindDirectTransitiva(Rdd_funion,Op)
+    FindIndirectTransitiva(Rdd_funion,transOp)
+    valorOrigemNova=vO
+    valorDestinoNova=vD
+    if transOp.count()>0:#Destino        
+        NR_df=R_dfunion.subtract(IndTransOp) #tirar a operação direta do repositorio               
+        EditarOperacaoDestino(transOp, valorOrigemNova, valorDestinoNova)#refazer destino com o valor origem VO (falta)    
+        R_dfunion=(R1 + new_dfRefeito)#R_dfunion.show()         
+    elif IndTransOp.count()>0:#origem
+        #no origem  dependentes=dependenteDireta+dependenteIndireta
+        #tirar a operação indireta do repositorio
+        NR_df=R_dfunion.subtract(IndTransOp)
+        EditarOperacaoDestino(transOp,valorOrigemNova, valorDestinoNova)
+        R_dfunion=NR_df.unionAll(new_dfRefeito)
+    else:
+       print('Não existe sobreposição direta e indireta') 
+       #R_dfunion.show() 
+    return R_dfunion   
+
+def main(sc):
+    conf = SparkConf().setAppName("pyspark test")
+    sc = SparkContext(conf=conf)
+    # Create an RDD
+    #R = sc.textFile("file:///home/cloudera/Mock_Data.txt")
+    R= sc.textFile("file:///home/cloudera/Dataframe/test1_transitiva1")
+    R1 = R.map(split_repPrInt)# 2.
+    R1.collect()
+
+    R = sc.textFile("file:///home/cloudera/print.txt")
+    R1 = R.map(split_repPrInt)# 2.
+    R1.collect()
+    R1 =sc.textFile("file:///home/cloudera/print.txt").map(lambda line: line.split(";"))
+  R1.collect()
+    vNome='Isaura'
+    vObjKey='TituloArtigo=PrInt: Provenance Model for Data Integration'
+    vObjAtt='Pagina'
+    valorOrigemNova = 20
+    valorDestinoNova = 24
+    FindDependenteDiretaRdd(R1,vNome,vObjKey, vObjAtt)
+
+    vNome='Mary'
+    vObjKey='Pooch Welding Supply Company, Inc.'
+    vObjAtt='Nitrogen'
+    valorOrigemNova = '2 ml'
+    valorDestinoNova = '4 ml'
+    FindDirectTransitiva(R1,vNome,vObjKey, vObjAtt)
+    FindIndirectTransitiva(R1,vNome,vObjKey,vObjAtt)
+
+
+   
+    for d in ovlpedOrigin:
+       print "%s %s %s" % (d[0], d[1], d[2])  
+    for d in ovlpedTarget:
+       print "%s %s %s" % (d[0], d[1], d[2])     
+   
+
+
+if __name__ == "__main__":
+    # Configure Spark
+    conf = SparkConf().setAppName(APP_NAME)
+    conf = conf.setMaster('local')
+    sc   = SparkContext(conf=conf)
+    main(sc)
